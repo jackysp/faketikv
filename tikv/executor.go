@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/juju/errors"
+	"github.com/ngaut/arena"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/kv"
@@ -37,6 +38,31 @@ type executor interface {
 	Cursor() (key []byte, desc bool)
 }
 
+type PingPongPool struct {
+	pools   [2]*arena.SimpleArenaAllocator
+	curPool *arena.SimpleArenaAllocator
+	curIdx  int
+}
+
+func (pp *PingPongPool) CurrentPool() *arena.SimpleArenaAllocator {
+	return pp.curPool
+}
+
+func (pp *PingPongPool) ResetPool() {
+	pp.curIdx++
+	pp.curPool = pp.pools[pp.curIdx%2]
+	pp.curPool.Reset()
+}
+
+func NewPingPongPool() *PingPongPool {
+	pp := &PingPongPool{}
+	for i := 0; i < 2; i++ {
+		pp.pools[i] = arena.NewArenaAllocator(96 * 1024)
+	}
+	pp.ResetPool()
+	return pp
+}
+
 type tableScanExec struct {
 	*tipb.TableScan
 	colIDs         map[int64]int
@@ -56,6 +82,8 @@ type tableScanExec struct {
 	lockChecked bool
 
 	src executor
+
+	pool *PingPongPool
 }
 
 func (e *tableScanExec) SetSrcExec(exec executor) {
@@ -191,6 +219,47 @@ func (e *tableScanExec) fillRowsFromPoint(ran kv.KeyRange) error {
 	return nil
 }
 
+// getRowData decodes raw byte slice to row data.
+func (e *tableScanExec) getRowData(columns []*tipb.ColumnInfo, colIDs map[int64]int, handle int64, value []byte) ([][]byte, error) {
+	values, err := tablecodec.CutRowNew(value, colIDs)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if values == nil {
+		values = make([][]byte, len(colIDs))
+	}
+	// Fill the handle and null columns.
+	for _, col := range columns {
+		id := col.GetColumnId()
+		offset := colIDs[id]
+		if col.GetPkHandle() || id == model.ExtraHandleID {
+			var handleData []byte
+			if mysql.HasUnsignedFlag(uint(col.GetFlag())) {
+				// PK column is Unsigned.
+				handleData = fastEncodeUInt64(uint64(handle))
+			} else {
+				handleData = fastEncodeInt64WithPool(handle, e.pool.CurrentPool())
+			}
+			values[offset] = handleData
+			continue
+		}
+		if hasColVal(values, colIDs, id) {
+			continue
+		}
+		if len(col.DefaultVal) > 0 {
+			values[offset] = col.DefaultVal
+			continue
+		}
+		if mysql.HasNotNullFlag(uint(col.GetFlag())) {
+			return nil, errors.Errorf("Miss column %d", id)
+		}
+
+		values[offset] = []byte{codec.NilFlag}
+	}
+
+	return values, nil
+}
+
 const scanLimit = 128
 
 func (e *tableScanExec) fillRowsFromRange(ran kv.KeyRange) error {
@@ -203,6 +272,11 @@ func (e *tableScanExec) fillRowsFromRange(ran kv.KeyRange) error {
 	}
 	var pairs []Pair
 	reader := e.reqCtx.getDBReader()
+	if e.pool == nil {
+		e.pool = NewPingPongPool()
+	}
+	e.pool.ResetPool()
+	reader.UsePool(e.pool.CurrentPool())
 	if e.Desc {
 		pairs = reader.ReverseScan(ran.StartKey, e.seekKey, scanLimit, e.startTS)
 	} else {
@@ -219,7 +293,7 @@ func (e *tableScanExec) fillRowsFromRange(ran kv.KeyRange) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		row, err := getRowData(e.Columns, e.colIDs, handle, pair.Value)
+		row, err := e.getRowData(e.Columns, e.colIDs, handle, pair.Value)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -685,6 +759,29 @@ func hasColVal(data [][]byte, colIDs map[int64]int, id int64) bool {
 	return false
 }
 
+const (
+	varintFlag  byte = 8
+	uvarintFlag byte = 9
+)
+
+func fastEncodeInt64(v int64) []byte {
+	b := make([]byte, 0, 10)
+	b = append(b, varintFlag)
+	return codec.EncodeVarint(b, v)
+}
+
+func fastEncodeInt64WithPool(v int64, p *arena.SimpleArenaAllocator) []byte {
+	b := p.AllocBytes(10)
+	b = append(b, varintFlag)
+	return codec.EncodeVarint(b, v)
+}
+
+func fastEncodeUInt64(v uint64) []byte {
+	b := make([]byte, 0, 10)
+	b = append(b, uvarintFlag)
+	return codec.EncodeUvarint(b, v)
+}
+
 // getRowData decodes raw byte slice to row data.
 func getRowData(columns []*tipb.ColumnInfo, colIDs map[int64]int, handle int64, value []byte) ([][]byte, error) {
 	values, err := tablecodec.CutRowNew(value, colIDs)
@@ -699,16 +796,12 @@ func getRowData(columns []*tipb.ColumnInfo, colIDs map[int64]int, handle int64, 
 		id := col.GetColumnId()
 		offset := colIDs[id]
 		if col.GetPkHandle() || id == model.ExtraHandleID {
-			var handleDatum types.Datum
+			var handleData []byte
 			if mysql.HasUnsignedFlag(uint(col.GetFlag())) {
 				// PK column is Unsigned.
-				handleDatum = types.NewUintDatum(uint64(handle))
+				handleData = fastEncodeUInt64(uint64(handle))
 			} else {
-				handleDatum = types.NewIntDatum(handle)
-			}
-			handleData, err1 := codec.EncodeValue(nil, nil, handleDatum)
-			if err1 != nil {
-				return nil, errors.Trace(err1)
+				handleData = fastEncodeInt64(handle)
 			}
 			values[offset] = handleData
 			continue

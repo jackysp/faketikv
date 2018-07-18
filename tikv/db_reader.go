@@ -5,6 +5,7 @@ import (
 
 	"github.com/coocood/badger"
 	"github.com/juju/errors"
+	"github.com/ngaut/arena"
 )
 
 func (store *MVCCStore) NewDBReader(reqCtx *requestCtx) *DBReader {
@@ -28,6 +29,12 @@ type DBReader struct {
 	iter    *badger.Iterator
 	revIter *badger.Iterator
 	oldIter *badger.Iterator
+
+	pool *arena.SimpleArenaAllocator
+}
+
+func (r *DBReader) UsePool(p *arena.SimpleArenaAllocator) {
+	r.pool = p
 }
 
 func (r *DBReader) Get(key []byte, startTS uint64) ([]byte, error) {
@@ -93,15 +100,20 @@ func (r *DBReader) BatchGet(keys [][]byte, startTS uint64) []Pair {
 }
 
 func (r *DBReader) Scan(startKey, endKey []byte, limit int, startTS uint64) []Pair {
-	var pairs []Pair
+	pairs := make([]Pair, 0, 128)
 	iter := r.getIter()
+	if r.pool == nil {
+		r.pool = arena.NewArenaAllocator(96 * 1024)
+	}
 	for iter.Seek(startKey); iter.Valid(); iter.Next() {
 		item := iter.Item()
-		key := item.KeyCopy(nil)
+		rawkey := item.Key()
+		key := r.pool.AllocBytesWithLen(len(rawkey), len(rawkey))
+		copy(key, rawkey)
 		if exceedEndKey(key, endKey) {
 			break
 		}
-		mvVal, err := decodeValue(item)
+		mvVal, err := decodeValueWithPool(item, r.pool)
 		if err != nil {
 			return []Pair{{Err: err}}
 		}

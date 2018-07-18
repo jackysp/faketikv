@@ -5,6 +5,7 @@ import (
 
 	"github.com/coocood/badger"
 	"github.com/juju/errors"
+	"github.com/ngaut/arena"
 	"github.com/pingcap/tidb/util/codec"
 )
 
@@ -36,6 +37,19 @@ func decodeValue(item *badger.Item) (v mvccValue, err error) {
 	}
 	v.mvccValueHdr = *(*mvccValueHdr)(unsafe.Pointer(&val[0]))
 	if len(val) > mvccValueHdrSize {
+		v.value = append(v.value[:0], val[mvccValueHdrSize:]...)
+	}
+	return v, nil
+}
+
+func decodeValueWithPool(item *badger.Item, pool *arena.SimpleArenaAllocator) (v mvccValue, err error) {
+	val, err := item.Value()
+	if err != nil {
+		return v, errors.Trace(err)
+	}
+	v.mvccValueHdr = *(*mvccValueHdr)(unsafe.Pointer(&val[0]))
+	if len(val) > mvccValueHdrSize {
+		v.value = pool.AllocBytesWithLen(0, len(val)-mvccValueHdrSize)
 		v.value = append(v.value[:0], val[mvccValueHdrSize:]...)
 	}
 	return v, nil
