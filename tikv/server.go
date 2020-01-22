@@ -32,6 +32,22 @@ type Server struct {
 	stopped       int32
 }
 
+func (svr *Server) RegisterLockObserver(context.Context, *kvrpcpb.RegisterLockObserverRequest) (*kvrpcpb.RegisterLockObserverResponse, error) {
+	panic("not implemented")
+}
+
+func (svr *Server) CheckLockObserver(context.Context, *kvrpcpb.CheckLockObserverRequest) (*kvrpcpb.CheckLockObserverResponse, error) {
+	panic("not implemented")
+}
+
+func (svr *Server) RemoveLockObserver(context.Context, *kvrpcpb.RemoveLockObserverRequest) (*kvrpcpb.RemoveLockObserverResponse, error) {
+	panic("not implemented")
+}
+
+func (svr *Server) PhysicalScanLock(*kvrpcpb.PhysicalScanLockRequest, tikvpb.Tikv_PhysicalScanLockServer) error {
+	panic("not implemented")
+}
+
 func NewServer(rm RegionManager, store *MVCCStore, innerServer InnerServer) *Server {
 	return &Server{
 		mvccStore:     store,

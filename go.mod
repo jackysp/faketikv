@@ -14,17 +14,17 @@ require (
 	github.com/pierrec/lz4 v2.0.5+incompatible
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errors v0.11.5-0.20190809092503-95897b64e011
-	github.com/pingcap/kvproto v0.0.0-20191217072959-393e6c0fd4b7
-	github.com/pingcap/parser v0.0.0-20191230064650-03937644ab9b
+	github.com/pingcap/kvproto v0.0.0-20200116032135-1082c388cb01
+	github.com/pingcap/parser v0.0.0-20200109073933-a9496438d77d
 	github.com/pingcap/tidb v1.1.0-beta.0.20200103053909-324a4686f08e
-	github.com/pingcap/tipb v0.0.0-20191209145133-44f75c9bef33
+	github.com/pingcap/tipb v0.0.0-20191227083941-3996eff010dc
 	github.com/prometheus/client_golang v1.0.0
 	github.com/shirou/gopsutil v2.19.10+incompatible
 	github.com/stretchr/testify v1.4.0
 	github.com/uber-go/atomic v1.3.2
 	github.com/zhangjinpeng1987/raft v0.0.0-20190624145930-deeb32d6553d
 	go.etcd.io/bbolt v1.3.3 // indirect
-	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b
+	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
 	google.golang.org/grpc v1.25.1
 	gopkg.in/mgo.v2 v2.0.0-20180705113604-9856a29383ce // indirect
@@ -33,3 +33,7 @@ require (
 replace go.etcd.io/etcd => github.com/zhangjinpeng1987/etcd v0.0.0-20190226085253-137eac022b64
 
 go 1.13
+
+replace github.com/pingcap/pd => github.com/jackysp/pd v1.1.0-beta.0.20200119133606-8452d40937af
+
+replace github.com/pingcap/tidb => github.com/jackysp/tidb v1.0.1-0.20200119133750-d5170787c492
